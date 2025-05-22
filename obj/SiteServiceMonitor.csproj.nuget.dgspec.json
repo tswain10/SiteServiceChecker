@@ -43,6 +43,10 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "dependencies": {
+            "Microsoft.Windows.Compatibility": {
+              "target": "Package",
+              "version": "[9.0.5, )"
+            },
             "System.ServiceProcess.ServiceController": {
               "target": "Package",
               "version": "[9.0.5, )"

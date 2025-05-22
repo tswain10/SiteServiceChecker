@@ -4,14 +4,19 @@ using System.IO;
 using System.Net.Http;
 using System.ServiceProcess;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Drawing;
 
 namespace SiteServiceMonitor
 {
-    class Program
+    public class Program
     {
-
         static string dataFile = "monitorlist.json";
+        static string logFile = "monitorlog.txt";
+        static Timer? monitorTimer;
+        static int monitorIntervalMs = 60000; // 60 seconds
 
         class MonitorData
         {
@@ -28,52 +33,32 @@ namespace SiteServiceMonitor
 
         static MonitorData monitorData = new MonitorData();
 
-        static async Task Main(string[] args)
+        public static void Main(string[] args)
         {
             LoadMonitorData();
-            while (true)
+            ServiceBase.Run(new MonitorService());
+        }
+
+        public class MonitorService : ServiceBase
+        {
+            public MonitorService()
             {
-                Console.WriteLine("\nSite/Service Monitor");
-                Console.WriteLine("1. Add website URL");
-                Console.WriteLine("2. Add server name or IP");
-                Console.WriteLine("3. Add service on server");
-                Console.WriteLine("4. Check status");
-                Console.WriteLine("5. Exit");
-                Console.Write("Select an option: ");
-                var input = Console.ReadLine();
-                switch (input)
-                {
-                    case "1":
-                        Console.Write("Enter website URL: ");
-                        var url = Console.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(url)) monitorData.WebsiteUrls.Add(url);
-                        SaveMonitorData();
-                        break;
-                    case "2":
-                        Console.Write("Enter server name or IP: ");
-                        var server = Console.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(server)) monitorData.ServerNamesOrIps.Add(server);
-                        SaveMonitorData();
-                        break;
-                    case "3":
-                        Console.Write("Enter server name or IP: ");
-                        var svcServer = Console.ReadLine();
-                        Console.Write("Enter service name: ");
-                        var svcName = Console.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(svcServer) && !string.IsNullOrWhiteSpace(svcName))
-                            monitorData.Services.Add(new ServiceEntry { Server = svcServer, Service = svcName });
-                        SaveMonitorData();
-                        break;
-                    case "4":
-                        await CheckStatus();
-                        break;
-                    case "5":
-                        SaveMonitorData();
-                        return;
-                    default:
-                        Console.WriteLine("Invalid option.");
-                        break;
-                }
+                this.ServiceName = "SiteServiceMonitor";
+                this.CanStop = true;
+                this.CanPauseAndContinue = false;
+                this.AutoLog = true;
+            }
+
+            protected override void OnStart(string[] args)
+            {
+                Log("Service started.");
+                monitorTimer = new Timer(async _ => await CheckStatus(), null, 0, monitorIntervalMs);
+            }
+
+            protected override void OnStop()
+            {
+                Log("Service stopped.");
+                monitorTimer?.Dispose();
             }
         }
 
@@ -93,15 +78,47 @@ namespace SiteServiceMonitor
             }
         }
 
-        static void SaveMonitorData()
+        static void Log(string message, bool isError = false)
         {
-            var json = JsonSerializer.Serialize(monitorData, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(dataFile, json);
+            var logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
+            File.AppendAllText(logFile, logEntry);
+            if (isError)
+            {
+                try
+                {
+                    ShowWindowsNotification("SiteServiceMonitor Alert", message);
+                }
+                catch { /* Notification failed, ignore */ }
+            }
+        }
+
+        static void ShowWindowsNotification(string title, string message)
+        {
+            // Use Windows Toast Notification via PowerShell as a fallback for Windows Service
+            try
+            {
+                string escapedTitle = title.Replace("'", "''");
+                string escapedMessage = message.Replace("'", "''");
+                string psCommand = $@"
+                    [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+                    $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+                    $textNodes = $template.GetElementsByTagName('text')
+                    $textNodes.Item(0).AppendChild($template.CreateTextNode('{escapedTitle}')) > $null
+                    $textNodes.Item(1).AppendChild($template.CreateTextNode('{escapedMessage}')) > $null
+                    $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+                    $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('SiteServiceMonitor')
+                    $notifier.Show($toast)
+                ";
+                var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", $"-NoProfile -WindowStyle Hidden -Command \"{psCommand}\"");
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch { /* Notification failed, ignore */ }
         }
 
         static async Task CheckStatus()
         {
-            Console.WriteLine("\n--- Website Status ---");
             using (var httpClient = new HttpClient())
             {
                 foreach (var url in monitorData.WebsiteUrls)
@@ -115,41 +132,60 @@ namespace SiteServiceMonitor
                     try
                     {
                         var response = await httpClient.GetAsync(checkedUrl);
-                        Console.WriteLine($"{url}: {(response.IsSuccessStatusCode ? "OK" : $"Error ({response.StatusCode})")}");
+                        if (response.IsSuccessStatusCode)
+                        {
+                        Log($"Website OK: {url}");
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Console.WriteLine($"{url}: Error ({ex.Message})");
+                        Log($"Website ERROR: {url} (Status: {response.StatusCode})", true);
                     }
+                }
+                catch (Exception ex)
+                {
+                    Log($"Website ERROR: {url} ({ex.Message})", true);
+                }
                 }
             }
 
-            Console.WriteLine("\n--- Server Status (Ping) ---");
             foreach (var server in monitorData.ServerNamesOrIps)
             {
                 try
                 {
                     var ping = new System.Net.NetworkInformation.Ping();
                     var reply = ping.Send(server, 2000);
-                    Console.WriteLine($"{server}: {(reply.Status == System.Net.NetworkInformation.IPStatus.Success ? "Reachable" : "Unreachable")}");
+                    if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
+                    {
+                        Log($"Server OK: {server}");
+                    }
+                    else
+                    {
+                        Log($"Server ERROR: {server} (Unreachable)", true);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"{server}: Error ({ex.Message})");
+                    Log($"Server ERROR: {server} ({ex.Message})", true);
                 }
             }
 
-            Console.WriteLine("\n--- Service Status ---");
             foreach (var entry in monitorData.Services)
             {
                 try
                 {
                     ServiceController sc = new ServiceController(entry.Service, entry.Server);
-                    Console.WriteLine($"{entry.Service} on {entry.Server}: {sc.Status}");
+                    if (sc.Status == ServiceControllerStatus.Running)
+                    {
+                        Log($"Service OK: {entry.Service} on {entry.Server}");
+                    }
+                    else
+                    {
+                        Log($"Service ERROR: {entry.Service} on {entry.Server} (Status: {sc.Status})", true);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"{entry.Service} on {entry.Server}: Error ({ex.Message})");
+                    Log($"Service ERROR: {entry.Service} on {entry.Server} ({ex.Message})", true);
                 }
             }
         }
