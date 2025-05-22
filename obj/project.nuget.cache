@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "I4a4jhW8DGk=",
+  "success": true,
+  "projectFilePath": "D:\\_Repos\\SiteServiceMonitor\\SiteServiceMonitor.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\TreyS\\.nuget\\packages\\system.diagnostics.eventlog\\9.0.5\\system.diagnostics.eventlog.9.0.5.nupkg.sha512",
+    "C:\\Users\\TreyS\\.nuget\\packages\\system.serviceprocess.servicecontroller\\9.0.5\\system.serviceprocess.servicecontroller.9.0.5.nupkg.sha512"
+  ],
+  "logs": []
+}
