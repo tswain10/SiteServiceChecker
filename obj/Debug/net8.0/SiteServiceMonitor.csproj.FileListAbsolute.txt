@@ -19,3 +19,4 @@ D:\_Repos\SiteServiceMonitor\obj\Debug\net8.0\refint\SiteServiceMonitor.dll
 D:\_Repos\SiteServiceMonitor\obj\Debug\net8.0\SiteServiceMonitor.pdb
 D:\_Repos\SiteServiceMonitor\obj\Debug\net8.0\SiteServiceMonitor.genruntimeconfig.cache
 D:\_Repos\SiteServiceMonitor\obj\Debug\net8.0\ref\SiteServiceMonitor.dll
+D:\_Repos\SiteServiceMonitor\obj\Debug\net8.0\SiteServiceMonitor.sourcelink.json

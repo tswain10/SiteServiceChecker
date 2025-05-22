@@ -1,19 +1,36 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.ServiceProcess;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace SiteServiceMonitor
 {
     class Program
     {
-        static List<string> websiteUrls = new List<string>();
-        static List<string> serverNamesOrIps = new List<string>();
-        static List<(string server, string service)> services = new List<(string, string)>();
+
+        static string dataFile = "monitorlist.json";
+
+        class MonitorData
+        {
+            public List<string> WebsiteUrls { get; set; } = new List<string>();
+            public List<string> ServerNamesOrIps { get; set; } = new List<string>();
+            public List<ServiceEntry> Services { get; set; } = new List<ServiceEntry>();
+        }
+
+        class ServiceEntry
+        {
+            public string Server { get; set; } = string.Empty;
+            public string Service { get; set; } = string.Empty;
+        }
+
+        static MonitorData monitorData = new MonitorData();
 
         static async Task Main(string[] args)
         {
+            LoadMonitorData();
             while (true)
             {
                 Console.WriteLine("\nSite/Service Monitor");
@@ -29,12 +46,14 @@ namespace SiteServiceMonitor
                     case "1":
                         Console.Write("Enter website URL: ");
                         var url = Console.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(url)) websiteUrls.Add(url);
+                        if (!string.IsNullOrWhiteSpace(url)) monitorData.WebsiteUrls.Add(url);
+                        SaveMonitorData();
                         break;
                     case "2":
                         Console.Write("Enter server name or IP: ");
                         var server = Console.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(server)) serverNamesOrIps.Add(server);
+                        if (!string.IsNullOrWhiteSpace(server)) monitorData.ServerNamesOrIps.Add(server);
+                        SaveMonitorData();
                         break;
                     case "3":
                         Console.Write("Enter server name or IP: ");
@@ -42,12 +61,14 @@ namespace SiteServiceMonitor
                         Console.Write("Enter service name: ");
                         var svcName = Console.ReadLine();
                         if (!string.IsNullOrWhiteSpace(svcServer) && !string.IsNullOrWhiteSpace(svcName))
-                            services.Add((svcServer, svcName));
+                            monitorData.Services.Add(new ServiceEntry { Server = svcServer, Service = svcName });
+                        SaveMonitorData();
                         break;
                     case "4":
                         await CheckStatus();
                         break;
                     case "5":
+                        SaveMonitorData();
                         return;
                     default:
                         Console.WriteLine("Invalid option.");
@@ -56,12 +77,34 @@ namespace SiteServiceMonitor
             }
         }
 
+        static void LoadMonitorData()
+        {
+            if (File.Exists(dataFile))
+            {
+                try
+                {
+                    var json = File.ReadAllText(dataFile);
+                    monitorData = JsonSerializer.Deserialize<MonitorData>(json) ?? new MonitorData();
+                }
+                catch
+                {
+                    monitorData = new MonitorData();
+                }
+            }
+        }
+
+        static void SaveMonitorData()
+        {
+            var json = JsonSerializer.Serialize(monitorData, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(dataFile, json);
+        }
+
         static async Task CheckStatus()
         {
             Console.WriteLine("\n--- Website Status ---");
             using (var httpClient = new HttpClient())
             {
-                foreach (var url in websiteUrls)
+                foreach (var url in monitorData.WebsiteUrls)
                 {
                     string checkedUrl = url;
                     if (!checkedUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
@@ -82,7 +125,7 @@ namespace SiteServiceMonitor
             }
 
             Console.WriteLine("\n--- Server Status (Ping) ---");
-            foreach (var server in serverNamesOrIps)
+            foreach (var server in monitorData.ServerNamesOrIps)
             {
                 try
                 {
@@ -97,16 +140,16 @@ namespace SiteServiceMonitor
             }
 
             Console.WriteLine("\n--- Service Status ---");
-            foreach (var (server, service) in services)
+            foreach (var entry in monitorData.Services)
             {
                 try
                 {
-                    ServiceController sc = new ServiceController(service, server);
-                    Console.WriteLine($"{service} on {server}: {sc.Status}");
+                    ServiceController sc = new ServiceController(entry.Service, entry.Server);
+                    Console.WriteLine($"{entry.Service} on {entry.Server}: {sc.Status}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"{service} on {server}: Error ({ex.Message})");
+                    Console.WriteLine($"{entry.Service} on {entry.Server}: Error ({ex.Message})");
                 }
             }
         }
